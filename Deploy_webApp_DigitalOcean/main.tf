@@ -16,6 +16,34 @@ resource "digitalocean_ssh_key" "web_ssh_key" {
   public_key = file("/Users/apple/.ssh/id_rsa.pub")
 }
 
+resource "digitalocean_database_cluster" "web_db" {
+  name       = "web_db"
+  engine     = "mysql"
+  version    = "8"
+  size       = "db-s-1vcpu-1gb"
+  region     = var.region
+  node_count = 1
+}
+
+resource "digitalocean_database_firewall" "web_db-fw" {
+  cluster_id = digitalocean_database_cluster.web_db.id
+
+  rule {
+    type  = "tag"
+    value = digitalocean_tag.web_tag.id
+  }
+}
+
+resource "digitalocean_database_user" "web_db-user" {
+  cluster_id        = digitalocean_database_cluster.web_db.id
+  name              = "web-user"
+  mysql_auth_plugin = "mysql_native_password"
+}
+
+resource "digitalocean_tag" "web_tag" {
+  name = "web-app"
+}
+
 resource "digitalocean_droplet" "web-droplet" {
   count              = 2
   image              = "ubuntu-18-04-x64"
@@ -27,7 +55,14 @@ resource "digitalocean_droplet" "web-droplet" {
   ssh_keys = [
     digitalocean_ssh_key.web_ssh_key.id
   ]
-  user_data = file("${path.module}/files/user-data.sh")
+  user_data = templatefile("${path.module}/files/user-data.sh", {
+    host     = digitalocean_database_cluster.web_db.private_host,
+    user     = "web-user",
+    database = digitalocean_database_cluster.web_db.database,
+    password = digitalocean_database_user.db-user.password,
+    port     = digitalocean_database_cluster.web_db.port
+  })
+  tags = [digitalocean_tag.web_tag.id]
 }
 
 resource "digitalocean_certificate" "web_certificate" {
